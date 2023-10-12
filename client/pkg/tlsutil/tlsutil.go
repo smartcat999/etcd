@@ -15,10 +15,13 @@
 package tlsutil
 
 import (
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"io/ioutil"
+	"os"
 )
 
 // NewCertPool creates x509 certPool with provided CA files.
@@ -51,6 +54,8 @@ func NewCertPool(CAFiles []string) (*x509.CertPool, error) {
 
 // NewCert generates TLS cert by using the given cert,key and parse function.
 func NewCert(certfile, keyfile string, parseFunc func([]byte, []byte) (tls.Certificate, error)) (*tls.Certificate, error) {
+	encKey := os.Getenv("KEY_PASS")
+
 	cert, err := ioutil.ReadFile(certfile)
 	if err != nil {
 		return nil, err
@@ -59,6 +64,12 @@ func NewCert(certfile, keyfile string, parseFunc func([]byte, []byte) (tls.Certi
 	key, err := ioutil.ReadFile(keyfile)
 	if err != nil {
 		return nil, err
+	}
+
+	if encKey != "" {
+		if pkey, err := ParseRSAPrivateKeyFromPEMWithPassword(key, encKey); err == nil {
+			key = ParseRSAPrivateKeyToMemory(pkey)
+		}
 	}
 
 	if parseFunc == nil {
@@ -70,4 +81,44 @@ func NewCert(certfile, keyfile string, parseFunc func([]byte, []byte) (tls.Certi
 		return nil, err
 	}
 	return &tlsCert, nil
+}
+
+func ParseRSAPrivateKeyFromPEMWithPassword(key []byte, password string) (*rsa.PrivateKey, error) {
+	var err error
+
+	// Parse PEM block
+	var block *pem.Block
+	if block, _ = pem.Decode(key); block == nil {
+		return nil, errors.New("invalid Key: Key must be PEM encoded PKCS1 or PKCS8 private key")
+	}
+
+	var parsedKey interface{}
+
+	var blockDecrypted []byte
+	if blockDecrypted, err = x509.DecryptPEMBlock(block, []byte(password)); err != nil {
+		return nil, err
+	}
+
+	if parsedKey, err = x509.ParsePKCS1PrivateKey(blockDecrypted); err != nil {
+		if parsedKey, err = x509.ParsePKCS8PrivateKey(blockDecrypted); err != nil {
+			return nil, err
+		}
+	}
+
+	var pkey *rsa.PrivateKey
+	var ok bool
+	if pkey, ok = parsedKey.(*rsa.PrivateKey); !ok {
+		return nil, errors.New("key is not a valid RSA private key")
+	}
+
+	return pkey, nil
+}
+
+func ParseRSAPrivateKeyToMemory(key *rsa.PrivateKey) []byte {
+	keybytes := x509.MarshalPKCS1PrivateKey(key)
+	block := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: keybytes,
+	}
+	return pem.EncodeToMemory(block)
 }
