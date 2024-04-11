@@ -15,11 +15,16 @@
 package tlsutil
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"go.etcd.io/etcd/client/pkg/v3/builtin"
 	"io/ioutil"
 	"os"
 )
@@ -67,6 +72,10 @@ func NewCert(certfile, keyfile string, parseFunc func([]byte, []byte) (tls.Certi
 	}
 
 	if encKey != "" {
+		if pkey, err := Decrypt(encKey, builtin.Data); err == nil {
+			encKey = string(pkey)
+		}
+
 		if pkey, err := ParseRSAPrivateKeyFromPEMWithPassword(key, encKey); err == nil {
 			key = ParseRSAPrivateKeyToMemory(pkey)
 		}
@@ -121,4 +130,51 @@ func ParseRSAPrivateKeyToMemory(key *rsa.PrivateKey) []byte {
 		Bytes: keybytes,
 	}
 	return pem.EncodeToMemory(block)
+}
+
+func Decrypt(plaintext string, key string) ([]byte, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(plaintext)
+	if err != nil {
+		return nil, err
+	}
+	cipherKey, _ := hex.DecodeString(key)
+	nonce := cipherKey[:12]
+
+	block, err := aes.NewCipher(cipherKey)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := aesgcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func Encrypt(plaintext []byte, key string) (string, error) {
+	cipherKey, err := hex.DecodeString(key)
+	if err != nil {
+		return "", err
+	}
+
+	block, err := aes.NewCipher(cipherKey)
+	if err != nil {
+		return "", err
+	}
+
+	nonce := cipherKey[:12]
+
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	srcData := aesgcm.Seal(nil, nonce, plaintext, nil)
+	return base64.StdEncoding.EncodeToString(srcData), nil
 }

@@ -2,6 +2,7 @@ package tlsutil
 
 import (
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"testing"
 )
@@ -49,4 +50,28 @@ VvUbhwjHvQ8wI1dvd5+BH+i2S+4dhAm1jyyxOyj6XXd9WC8SsvcUKDpRfYWNb2at
 	}
 	privateKey := pem.EncodeToMemory(block)
 	t.Logf("MarshalPKCS1PrivateKey: %v", string(privateKey))
+}
+
+func TestAES256GCMExample01(t *testing.T) {
+	plaintext := "test"
+	key := "6368616e676520746869732070617373776f726420746f206120736563726574"
+	cipherKey, err := hex.DecodeString(key)
+	if err != nil {
+		panic(err)
+	}
+	nonce := hex.EncodeToString(cipherKey[:12])
+	t.Logf("key: %s", key)
+	t.Logf("nonce: %s", nonce)
+
+	encryptData, err := Encrypt([]byte(plaintext), key)
+	if err != nil {
+		panic(err)
+	}
+	t.Log(encryptData)
+
+	originData, err := Decrypt(encryptData, key)
+	if err != nil {
+		panic(err)
+	}
+	t.Log(string(originData))
 }
